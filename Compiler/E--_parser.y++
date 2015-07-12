@@ -1,0 +1,696 @@
+%{
+
+#include "Ast.h"
+#include "ParserUtil.h"
+#include "Error.h"
+
+using namespace std;
+
+extern int verbosity;
+extern int yylex();
+extern void yyerror(const char *s);
+int offSet;
+extern const OpNode::OpInfo opInfo[];
+
+%}
+
+%union{
+  unsigned int 		 uVal;
+  double             dVal;
+  char*              cVal;
+  vector<string>*    strVector;
+  Value*             valVal;
+
+  ExprNode*          exprVal;
+  vector<ExprNode*>* exprList;
+  RefExprNode*       refexpVal;
+
+  ClassEntry*        classEntry;
+  Type*              typeVal;
+  vector<Type*>*     typeList; 
+
+  EventEntry*        eventEntry;                        
+  VariableEntry*     variableEntry;
+  FunctionEntry*     functionEntry;
+
+  BasePatNode*       patVal;
+  PrimitivePatNode*  primPatVal;
+  StmtNode*          stmtVal;
+  list<StmtNode*>*   stmtList;
+  IfNode*            ifVal;
+  CompoundStmtNode*  compoundStmtVal;
+  RuleNode*          ruleNode;
+
+  vector<RuleNode*>* transList;
+  
+  vector<Type*>*     formalTypeVal;
+  const OpNode::OpInfo*    funIval;
+};
+
+/* Operators */
+
+%token TOK_LEX_ERROR TOK_PAT_STAR TOK_PAT_OR TOK_PAT_NOT
+%token TOK_PLUS TOK_MINUS TOK_UMINUS TOK_MULT TOK_DIV TOK_MOD 
+%token TOK_BITAND TOK_BITOR TOK_BITNOT TOK_BITXOR TOK_SHL TOK_SHR 
+%token TOK_GT TOK_LT TOK_GE TOK_LE TOK_EQ  TOK_NE TOK_AND TOK_OR TOK_NOT 
+%token TOK_COMMA TOK_ASSIGN TOK_SEMICOLON TOK_COLON TOK_ARROW
+%token TOK_LBRACE TOK_RBRACE TOK_LPAREN TOK_RPAREN
+
+/* Unused keywords */
+%token TOK_RBRACK TOK_QMARK TOK_LONG TOK_BIT TOK_ENUM
+
+/* Key words */
+
+%token TOK_IF TOK_ELSE TOK_CLASS TOK_RETURN TOK_EVENT TOK_ANY TOK_PRINT 
+%token TOK_UINTNUM TOK_DOUBLENUM TOK_VOID TOK_STRING TOK_STRCONST 
+%token TOK_INT TOK_UNSIGNED TOK_BOOL TOK_BYTE TOK_DOUBLE TOK_SHORT
+%token TOK_TRUE TOK_FALSE TOK_IDENT
+%token TOK_WHILE TOK_BREAK
+
+/******************************** Type Info ********************************/
+/* Uncomment types below as you start adding rules.
+   They are commented right now to prevent compile errors.
+*/
+%type <functionEntry> func_decl function_identifier
+%type <variableEntry> var_decl var_decl1 form_param
+%type <typeList> form_param_maybe_list form_param_list 
+%type <eventEntry> event_header event_decl
+%type <patVal> event_pattern //rule_body1
+%type <primPatVal> event_and_args prim_pattern 
+%type <typeVal> type base_type btype type_name
+%type <exprList> expr_maybe_list expr_list
+%type <classEntry> class_decl
+%type <exprVal> expr func_invocation assignment var_pos_assignment
+%type <refexpVal> ref_expr
+%type <ruleNode> rule
+%type <strVector> event_param_maybe_list event_param_list
+%type <cVal> TOK_IDENT TOK_PRINT
+%type <uVal> TOK_UINTNUM 
+%type <dVal> TOK_DOUBLENUM 
+%type <cVal> TOK_STRCONST
+
+%type <valVal> literal
+%type <stmtList> statement_plus
+%type <stmtVal> statement return_statement while_statement break_statement
+%type <compoundStmtVal> comp_statement func_body func_maybe_body
+
+%type <ifVal>  if_statement
+
+
+/*********************   Precedence and Associativity    ********************/
+
+%nonassoc TOK_ASSIGN
+
+%left  TOK_PAT_OR 
+%left  TOK_COLON
+%left  TOK_PAT_STAR
+%right TOK_PAT_NOT
+
+%left  TOK_OR
+%left  TOK_AND
+%right TOK_NOT
+
+%nonassoc TOK_EQ TOK_NE TOK_GT TOK_LT TOK_GE TOK_LE
+
+%left  TOK_BITOR TOK_BITXOR
+%left  TOK_BITAND
+%right TOK_BITNOT 
+%left  TOK_SHL TOK_SHR
+
+%right TOK_DOUBLE_COLON
+
+%left  TOK_PLUS TOK_MINUS
+%left  TOK_MULT TOK_DIV TOK_MOD
+%right TOK_UMINUS 
+
+%left  TOK_LBRACK
+%left  TOK_DOT
+
+/**************************************************************************/
+
+%start specification
+%%
+
+specification: decl_star rule_plus {
+};
+
+decl_star: /* empty */ {}
+| decl_star decl {}
+;
+
+rule_plus: rule {}
+| rule_plus rule {}
+;
+
+decl: class_decl TOK_SEMICOLON {}
+| class_decl TOK_SEMICOLON TOK_SEMICOLON {}
+| func_decl TOK_SEMICOLON {}
+| event_decl TOK_SEMICOLON {}
+| var_decl {}
+;
+
+class_decl: TOK_CLASS TOK_IDENT {
+  SymTabEntry* pos_class = stm.lookUp($2);
+  if(pos_class == NULL){
+    $$ = new ClassEntry($2);
+    stm.insert($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$2);
+    $$ = NULL;
+  }
+};
+
+func_decl: function_identifier TOK_LPAREN form_param_maybe_list TOK_RPAREN func_maybe_body {
+  if($$!=NULL){
+    $1->body($5);
+    $$ = $1;
+    stm.leaveScope();
+  }
+};
+
+function_identifier: type TOK_IDENT {
+  SymTabEntry* ste = stm.lookUp($2);
+  if(ste==NULL){
+    $$ = new FunctionEntry($2,$1);
+    stm.insert($$);
+    stm.enterScope($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$2);
+    $$ = NULL;
+  }
+}
+
+func_maybe_body: /*empty*/ {
+  $$ = NULL;
+}
+| func_body {
+  $$ = $1;
+}
+;
+
+func_body: TOK_LBRACE var_decl_star statement_plus TOK_RBRACE {
+   $$ = new CompoundStmtNode($3);
+};
+
+statement_plus: statement {
+  $$ = new list<StmtNode*>();
+  if($1!=NULL){
+    $$->push_back($1);
+  }
+}
+| statement_plus statement {
+  $$ = $1;
+  if($2!=NULL){
+    $$->push_back($2);
+  }
+}
+;
+
+var_decl_star: /* empty */ {}
+| var_decl_star var_decl {}
+;
+
+var_decl: var_decl1 TOK_SEMICOLON {}
+| var_decl1 TOK_SEMICOLON TOK_SEMICOLON;
+
+var_decl1: type TOK_IDENT var_pos_assignment {
+  SymTabEntry* pos_var = stm.lookUp($2);
+  SymTabEntry* ste = stm.currentScope();
+  VariableEntry::VarKind vk = VariableEntry::VarKind::LOCAL_VAR;
+  if(ste->kind()==SymTabEntry::Kind::GLOBAL_KIND){
+    vk = VariableEntry::VarKind::GLOBAL_VAR;
+  } else if(ste->kind()==SymTabEntry::Kind::UNKNOWN_KIND){
+    vk = VariableEntry::VarKind::UNDEFINED;
+  }
+  if(pos_var == NULL || (pos_var->kind() == SymTabEntry::Kind::VARIABLE_KIND && ((VariableEntry*)pos_var)->varKind()!= vk)){
+    $$ = new VariableEntry($2,vk,$1,$3);
+    stm.insert($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$2);
+  }
+}
+| var_decl1 TOK_COMMA TOK_IDENT var_pos_assignment {
+  SymTabEntry* pos_var = stm.lookUp($3);
+  if(pos_var == NULL || (pos_var->kind() == SymTabEntry::Kind::VARIABLE_KIND && ((VariableEntry*)pos_var)->varKind()!= $1->varKind())){
+    $$ = new VariableEntry($3,$1->varKind(),$1->type(),$4);
+    stm.insert($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$3);
+  }
+};
+
+var_pos_assignment: /* empty */ {
+  $$ = NULL;
+}
+| TOK_ASSIGN expr {
+  $$ = $2;
+}
+
+event_decl: event_header TOK_LPAREN form_param_maybe_list TOK_RPAREN {
+  stm.leaveScope();
+  $$ = $1;
+};
+
+event_header: TOK_EVENT TOK_IDENT {
+  SymTabEntry* pos_event = stm.lookUp($2);
+  if(pos_event == NULL){
+    $$ = new EventEntry($2);
+    stm.insert($$);
+    stm.enterScope($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$2);
+    $$ = NULL;
+  }
+};
+
+rule: event_pattern TOK_ARROW statement {
+  SymTabEntry* ste = stm.currentScope(SymTabEntry::Kind::RULE_BLOCK_KIND);
+  BlockEntry* be = NULL;
+  if(ste != NULL){
+    be = (BlockEntry*) ste;
+  }
+  $$ = new RuleNode(be,$1,$3);
+  stm.leaveScope();
+
+  SymTabEntry* glob_ste = stm.currentScope();
+  if(glob_ste->kind()==SymTabEntry::Kind::GLOBAL_KIND){
+    GlobalEntry* glob = (GlobalEntry*) glob_ste;
+    glob->addRule($$);
+  } else {
+    errMsg("Not in global scope when leaving rule scope");
+  }
+};
+
+event_pattern: prim_pattern {
+  if($1 != NULL){
+    $$ = new PatNode(BasePatNode::PatNodeKind::PRIMITIVE,$1);
+  } else {
+    $$ = NULL;
+  }
+}
+| TOK_NOT event_pattern {
+  if($2 != NULL){
+    if($2->kind() == BasePatNode::PatNodeKind::PRIMITIVE){
+      $$ = new PatNode(BasePatNode::PatNodeKind::NEG,$2);
+    } else {
+      errMsg("Only simple patterns without `.', `*', and `!' operatorscan be negated");
+      $$ = NULL;
+    }
+  } else {
+    $$ = NULL;
+  }
+}
+| event_pattern TOK_PAT_STAR {
+  if($1 != NULL){
+    $$ = new PatNode(BasePatNode::PatNodeKind::STAR,$1);
+  } else {
+    $$ = NULL;
+  }
+}
+| event_pattern TOK_COLON event_pattern {
+  if($1 != NULL && $3 != NULL){
+    $$ = new PatNode(BasePatNode::PatNodeKind::SEQ,$1,$3);
+  } else {
+    $$ = NULL;
+  }
+}
+| event_pattern TOK_PAT_OR event_pattern {
+  if($1 != NULL && $3 != NULL){
+    $$ = new PatNode(BasePatNode::PatNodeKind::OR,$1,$3);
+  } else {
+    $$ = NULL;
+  }
+}
+| TOK_LPAREN event_pattern TOK_RPAREN {
+  $$ = $2;
+};
+
+prim_pattern: event_and_args {
+  $$ = $1;
+}
+| event_and_args TOK_BITOR expr {
+  if($1!=NULL){
+    $1->cond($3);
+  }
+  $$ = $1;
+};
+
+event_and_args: TOK_IDENT TOK_LPAREN event_param_maybe_list TOK_RPAREN {
+  $$ = NULL;
+  //Checking if in Global Scope
+  SymTabEntry* cur_scope = stm.currentScope();
+  if(cur_scope->kind()!=SymTabEntry::Kind::RULE_BLOCK_KIND){
+    stm.enterScope(new RuleBlockEntry());
+  }
+  //Processing Event
+  SymTabEntry* ste = stm.lookUp($1);
+  EventEntry* ee = NULL;
+  if(ste !=NULL && ste->kind() == SymTabEntry::Kind::EVENT_KIND){
+    ee = (EventEntry*) ste;
+
+    //Matching types to params
+    vector<VariableEntry*>* ve_list = new vector<VariableEntry*>();
+    vector<Type*> type_list = vector<Type*>();
+    const SymTab* st = ee->symTab();
+    if(st!=NULL){
+      for(SymTab::const_iterator i = st->begin(); i != st->end(); ++i){
+        if((*i)->kind()==SymTabEntry::Kind::VARIABLE_KIND){
+          VariableEntry* ve = (VariableEntry*) (*i);
+          if(ve->varKind()==VariableEntry::VarKind::PARAM_VAR){
+            type_list.push_back(ve->type());
+          }
+        }
+      }
+    }
+    if(type_list.size() == $3->size()){
+      for(unsigned int i = 0; i < type_list.size();++i){
+        SymTabEntry* pos_var = stm.lookUp((*$3)[i]);
+        if(pos_var==NULL || (pos_var->kind() == SymTabEntry::Kind::VARIABLE_KIND && ((VariableEntry*)pos_var)->varKind()!= VariableEntry::VarKind::LOCAL_VAR)){
+          VariableEntry* ve = new VariableEntry((*$3)[i],VariableEntry::VarKind::LOCAL_VAR,type_list[i],NULL);
+          stm.insert(ve);
+          ve_list->push_back(ve);
+        } else {
+          errMsg("Redefinition of name " + (string)(*$3)[i]);
+        }
+      }
+      $$ = new PrimitivePatNode(ee,ve_list,NULL);
+    } else {
+      errMsg((string)$1 + ": mismatch in the number of arguments");
+    }
+  } else {
+    errMsg("Expected an event name, but got \"" + (string)$1 + "\"");
+  }
+}
+| TOK_ANY {
+  //Checking if in Global Scope
+  SymTabEntry* cur_scope = stm.currentScope();
+  if(cur_scope->kind()!=SymTabEntry::Kind::RULE_BLOCK_KIND){
+    stm.enterScope(new RuleBlockEntry());
+  }
+  EventEntry* ee = new EventEntry("any");
+  vector<VariableEntry*>* ve_list = new vector<VariableEntry*>();
+  $$ = new PrimitivePatNode(ee,ve_list,NULL);
+};
+
+event_param_maybe_list: /* empty */ {
+  $$ = new vector<string>();
+}
+| event_param_list {
+  $$ = $1;
+};
+
+event_param_list: TOK_IDENT {
+  $$ = new vector<string>();
+  $$->push_back($1);
+}
+| event_param_list TOK_COMMA TOK_IDENT {
+  $1->push_back($3);
+  $$ = $1;
+};
+
+statement: if_statement {
+  $$ = $1;
+}
+| empty_statement TOK_SEMICOLON {
+  $$ = NULL;
+}
+| func_invocation TOK_SEMICOLON {
+  $$ = new ExprStmtNode($1);
+}
+| assignment TOK_SEMICOLON {
+  $$ = new ExprStmtNode($1);
+}
+| return_statement TOK_SEMICOLON {
+  $$ = $1;
+}
+| comp_statement {
+  $$ = $1;
+}
+| comp_statement TOK_SEMICOLON {
+  $$ = $1;
+}
+| while_statement {
+  $$ = $1;
+}
+| break_statement TOK_SEMICOLON {
+  $$ = $1;
+}
+;
+
+if_statement: TOK_IF expr statement {
+  $$ = new IfNode($2,$3);
+}
+| TOK_IF expr statement TOK_ELSE statement {
+  $$ = new IfNode($2,$3,$5);
+}
+;
+
+empty_statement: /* empty */ {}
+;
+
+return_statement: TOK_RETURN expr {
+  SymTabEntry* ste = stm.currentScope(SymTabEntry::Kind::FUNCTION_KIND);
+  if(ste == NULL){
+    errMsg("Return statement is valid only within a function");
+    $$ = NULL;
+  } else {
+    FunctionEntry * fe = (FunctionEntry*) ste;
+    $$ = new ReturnStmtNode($2,fe);
+  }
+};
+
+while_statement: TOK_WHILE expr comp_statement {
+  $$ = new WhileNode($2,$3);
+};
+
+break_statement: TOK_BREAK TOK_UINTNUM {
+  $$ = new BreakNode(new ValueNode(new Value($2,Type::TypeTag::UINT)));
+}
+| TOK_BREAK {
+  $$ = new BreakNode(new ValueNode(new Value(1,Type::TypeTag::UINT)));
+};
+
+comp_statement: enter_compound_statement statement_plus leave_compound_statement {
+  $$ = new CompoundStmtNode($2);
+};
+
+enter_compound_statement: TOK_LBRACE {
+  stm.enterScope(new BlockEntry(newName("block")));
+};
+
+leave_compound_statement: TOK_RBRACE {
+  stm.leaveScope();
+};
+
+form_param_maybe_list: /*empty*/ {
+  $$ = new vector<Type*>();
+}
+| form_param_list {
+  $$ = $1;
+}
+;
+
+form_param_list: form_param {
+  $$ = new vector<Type*>();
+  if($1!=NULL){
+    $$->push_back($1->type());
+  }
+}
+| form_param_list TOK_COMMA form_param {
+  if($3!=NULL){
+    $$->push_back($3->type());
+  }
+  $$ = $1;
+}
+;
+
+form_param: type TOK_IDENT {
+  SymTabEntry* pos_var = stm.lookUp($2);
+  if(pos_var == NULL || pos_var->kind() != SymTabEntry::Kind::VARIABLE_KIND || ((VariableEntry*)pos_var)->varKind()!=VariableEntry::VarKind::PARAM_VAR){
+    $$ = new VariableEntry($2,VariableEntry::VarKind::PARAM_VAR,$1,NULL);
+    stm.insert($$);
+  } else {
+    errMsg("Redefinition of name " + (string)$2);
+    $$ = NULL;
+  }
+};
+
+type: base_type { $$ = $1; }
+| type_name { $$ = $1; }
+;
+
+type_name: TOK_IDENT {
+  SymTabEntry* ste = stm.lookUp($1);
+  if(ste==NULL || SymTabEntry::Kind::CLASS_KIND!=ste->kind()){
+    errMsg("Undeclared type \"" + (string)$1 + "\"");
+    $$ = NULL;
+  } else {
+    $$ = new Type(ste,Type::TypeTag::CLASS);
+  }
+};
+
+base_type: TOK_UNSIGNED btype {
+  if($2->tag() == Type::TypeTag::INT){
+    $2->tag(Type::TypeTag::UINT);
+  } else {
+    errMsg("Invalid use of keyword \"unsigned\"");
+  }
+  $$=$2;
+}
+| btype {
+ $$=$1; 
+};
+
+btype: TOK_VOID {
+  $$ = new Type(Type::TypeTag::VOID);
+}
+| TOK_BOOL {
+  $$ = new Type(Type::TypeTag::BOOL);
+}
+| TOK_STRING {
+  $$ = new Type(Type::TypeTag::STRING);
+}
+| TOK_BYTE {
+  $$ = new Type(Type::TypeTag::BYTE);
+}
+| TOK_INT {
+  $$ = new Type(Type::TypeTag::INT);
+}
+| TOK_DOUBLE {
+  $$ = new Type(Type::TypeTag::DOUBLE);
+};
+
+expr: literal {
+  $$ = new ValueNode($1);
+}
+| ref_expr {
+  $$ = $1;
+}
+| assignment {
+  $$ = $1;
+}
+| func_invocation {
+  $$ =$1;
+}
+| TOK_MINUS expr {
+  $$ = new OpNode(OpNode::OpCode::UMINUS,$2);
+}
+| expr TOK_PLUS expr {
+  $$ = new OpNode(OpNode::OpCode::PLUS,$1,$3);
+}
+| expr TOK_MINUS expr {
+  $$ = new OpNode(OpNode::OpCode::MINUS,$1,$3);
+}
+| expr TOK_MULT expr {
+  $$ = new OpNode(OpNode::OpCode::MULT,$1,$3);
+}
+| expr TOK_DIV expr {
+  $$ = new OpNode(OpNode::OpCode::DIV,$1,$3);
+}
+| expr TOK_MOD expr {
+  $$ = new OpNode(OpNode::OpCode::MOD,$1,$3);
+}
+| TOK_BITNOT expr {
+  $$ = new OpNode(OpNode::OpCode::BITNOT,$2);
+}
+| expr TOK_BITAND expr {
+  $$ = new OpNode(OpNode::OpCode::BITAND,$1,$3);
+}
+| expr TOK_BITOR expr {
+  $$ = new OpNode(OpNode::OpCode::BITOR,$1,$3);
+}
+| expr TOK_BITXOR expr {
+  $$ = new OpNode(OpNode::OpCode::BITXOR,$1,$3);
+}
+| expr TOK_SHR expr {
+  $$ = new OpNode(OpNode::OpCode::SHR,$1,$3);
+}
+| expr TOK_SHL expr {
+  $$ = new OpNode(OpNode::OpCode::SHL,$1,$3);
+}
+| expr TOK_GT expr {
+  $$ = new OpNode(OpNode::OpCode::GT,$1,$3);
+}
+| expr TOK_LT expr {
+  $$ = new OpNode(OpNode::OpCode::LT,$1,$3);
+}
+| expr TOK_GE expr {
+  $$ = new OpNode(OpNode::OpCode::GE,$1,$3);
+}
+| expr TOK_LE expr {
+  $$ = new OpNode(OpNode::OpCode::LE,$1,$3);
+}
+| expr TOK_EQ expr {
+  $$ = new OpNode(OpNode::OpCode::EQ,$1,$3);
+}
+| expr TOK_NE expr {
+  $$ = new OpNode(OpNode::OpCode::NE,$1,$3);
+}
+| expr TOK_AND expr {
+  $$ = new OpNode(OpNode::OpCode::AND,$1,$3);
+}
+| expr TOK_OR expr {
+  $$ = new OpNode(OpNode::OpCode::OR,$1,$3);
+}
+| TOK_NOT expr {
+  $$ = new OpNode(OpNode::OpCode::NOT,$2);
+}
+| TOK_LPAREN expr TOK_RPAREN {
+  $$ = $2;
+}
+;
+
+literal: TOK_UINTNUM {
+  $$ = new Value($1,Type::TypeTag::UINT);
+}
+| TOK_DOUBLENUM {
+  $$ = new Value($1);
+}
+| TOK_TRUE {
+  $$ = new Value(true);
+}
+| TOK_FALSE {
+  $$ = new Value(false);
+}
+| TOK_STRCONST {
+  $$ = new Value($1);
+}
+;
+
+ref_expr: TOK_IDENT {
+  $$ = new RefExprNode($1);
+};
+
+assignment: ref_expr TOK_ASSIGN expr {
+  $$ = new OpNode(OpNode::OpCode::ASSIGN,$1,$3);
+};
+
+func_invocation: TOK_IDENT TOK_LPAREN expr_maybe_list TOK_RPAREN {
+  SymTabEntry* ste = stm.lookUp($1);
+  if(ste == NULL || ste->kind() != SymTabEntry::Kind::FUNCTION_KIND){
+    errMsg( "\"" + (string)$1 + "\" is not a function or module name");
+    $$ = NULL;
+  } else {
+    $$ = new InvocationNode(ste,$3);
+  }
+};
+
+expr_maybe_list: /* empty */ {
+  $$ = new vector<ExprNode*>();
+}
+| expr_list {
+  $$ = $1;
+}
+;
+
+expr_list: expr {
+  $$ = new vector<ExprNode*>();
+  $$->push_back($1);
+}
+| expr_list TOK_COMMA expr {
+  $$ = $1;
+  $$->push_back($3);
+}
+;
+
+%%

@@ -1,0 +1,4 @@
+event e1(int x);
+event e2();
+
+e2() -> {;};

@@ -1,0 +1,321 @@
+//Need to write print functions and constructors
+Ast.h
+	//For all AstNode constructors the line#, col#, and filename
+
+	class AstNode: ProgramElem
+		NodeType {PAT_NODE,EXPR_NODE,REACTION_NODE,STMT_NODE,SEQUENCE_NODE,RULE_NODE};
+
+		AstNode(NodeType,line#,col#,filename)
+		NodeType nodeType()
+		const Type* typeCheck()
+		void print(ostream,indent#)
+
+	class ExprNode: AstNode
+		ExprNodeType {REF_EXPR_NODE,OP_NODE,VALUE_NODE,INV_NODE}
+
+		ExprNode(ExprNodeType,Value*,line#,col#,filename)
+		ExprNodeType exprNodeType()
+		void exprNodeType(ExprNodeType)
+		const Value* value()
+		Type* coercedType()
+		void coercedType(const Type*)
+
+	class RefExprNode: ExprNode
+		RefExprNode(string ext,const SymTabEntry*,line#,col#,filename)
+		string ext()
+		void ext(string)
+		const SymTabEntry* symTabEntry()
+		void symTabEntry(const SymTabEntry*)
+
+	class OpNode: ExprNode
+		OpCode {UMINUS,PLUS,MINUS,MULT,DIV,MOD,EQ,NE,GT,LT,GE,LE,AND,OR,NOT,BITNOT,BITAND,BITOR,BITXOR,SHL,SHR,ASSIGN,PRINT,INVALID}
+		
+		OpNode(OpCode,ExprNode* l,ExprNode* r,line#,col#,filename)
+		//Right should be null for unary ops
+		OpCode opCode()
+		void opCode(OpCode)
+		const ExprNode* arg(unsigned int)
+		ExprNode* arg(unsigned int)
+		vector<ExprNode*> args()
+		unsigned int arity()
+
+	class ValueNode: ExprNode
+		ValueNode(Value*,line#,col#,filename)
+
+	class InvocationNode: ExprNode
+		InvocationNode(const SymTabEntry*,vector<Expr*>*,line#,col#,filename)
+		//Vector is list of input expressions
+		//Don't know what the SymTabEntry is for
+
+		const SymTabEntry* symTabEnry()
+		const vector<ExprNode*>* params()
+		vector<ExprNode*>* params()
+		void params(vector<ExprNode*>*)
+		const ExprNode* param(unsigned int)
+		ExprNode* param(unsigned int)
+		void param(ExprNode*,unsigned int)
+
+	class BasePatNode: AstNode
+		PatNodeKind {PRIMITIVE,EMPTY,NEG,SEQ,OR,STAR,UNDEFINED}
+
+		BasePatNode(PatNodeKind,line#,col#,filename)
+		PatNodeKind kind()
+		void kind(PatNodeKind)
+		const BasePatNode* parent()
+		BasePatNode* parent()
+		virtual bool hasSeqOps()
+		virtual bool hasNeg()
+		virtual bool hasAnyOrOther()
+		virtual bool isNegatable()
+
+	class PrimitivePatNode: BasePatNode
+		PrimitivePatNode(EventEntry*,vector<VariableEntry*>*,ExprNode*,line#,col#,filename)
+
+		const EventEntry* event()
+		EventEntry* event()
+
+		const vector<const VariableEntry*>* params()
+		vector<const VariableEntry*>* params()
+		void params(vector<const VariableEntry*>*)
+
+		const ExprNode* cond()
+		ExprNode* cond()
+		void cond(ExprNode*)
+
+		const list<const OpNode*>& asgs()
+		list<const OpNode*>& asgs()
+
+		bool hasSeqOps()
+		bool hasNeg()
+		bool hasAnyOrOther()
+
+	class PatNode: BasePatNode
+		PatNode(line#,col#,filename)
+		PatNode(PatNodeKind,BasePatNode*,BasePatNode*,line#,col#,filename)
+
+		const BasePatNode* pat1()
+		const BasePatNode* pat2()
+		BasePatNode* pat1()
+		BasePatNode* pat2()
+
+		bool hasSeqOps()
+		bool hasNeg()
+		bool hasAnyOrOther()
+
+	class StmtNode: AstNode
+		StmtNodeKind {ILLEGAL,EXPR,IF,COMPOUND,RETURN}
+
+		StmtNode(StmtNodeKind,line#,col#,filename)
+		StmtNodeKind stmtNodeKind()
+
+	class ReturnStmtNode: StmtNode
+		ReturnStmtNode(ExprNode*,FunctionEntry*,line#,col#,filename)
+
+	class ExprStmtNode: StmtNode
+		ExprStmtNode(ExprNode*,line#,col#,filename)
+
+	class CompoundStmtNode: StmtNode
+		CompoundStmtNode(list<StmtNode*>,line#,col#,filename)
+		const list<StmtNode*>* stmts()
+		list<StmtNode*>* stmts()
+		void add(StmtNode*)
+
+		void printWithoutBraces(ostream,indent)
+
+	class IfNode: StmtNode
+		IfNode(ExprNode*,StmtNode* thenStmt,StmtNode* elseStmt,line#,col#,filename)
+
+		const ExprNode* cond()
+		const StmtNode* elseStmt()
+		const StmtNode* thenStmt()
+
+		ExprNode* cond()
+		StmtNode* elseStmt()
+		StmtNode* thenStmt()
+
+	class RuleNode: AstNode
+		RuleNode(BlockEntry*,BasePatNode*,StmtNode*,line#,col#,filename)
+
+		const BlockEntry* ruleEntry()
+		BlockEntry* ruleEntry()
+
+		const BasePatNode* pat()
+		BasePatNode* pat()
+
+		const StmtNode* reaction()
+		StmtNode* reaction()
+
+Error.h
+	void errMsg(string,line#,col#,filename)
+	void errMsg(string,const ProgramElem*)
+	void warnMsg(string,line#,col#,filename)
+	void warnMsg(string,const ProgramElem*)
+
+	void resetErrs()
+	void resetWarns()
+	int warnCount()
+	int errCount()
+
+	void internalError(string,line#,filename)
+
+ParserUtil.h
+	ErrorST insertSymbolErrCheck(SymTabEntry*)
+	void enterScopeErrCheck(SymTabEntry*)
+	string newName(string)
+	string itoa(int)
+
+ProgramElem.h
+	//Automatically figures out line number, column number and filename when made if none supplied
+	class ProgramElem
+		ProgramElem(Type*=NULL,line#,col#,filename)
+
+		int line()
+		void line(int)
+
+		int column()
+		void column(int)
+
+		string file()
+		void file(string)
+
+		const Type* type()
+		Type* type()
+		void type(Type*)
+		Type::TypeTag typeTag()
+
+//Need to write print for these classses
+STEClasses.h
+	class GlobalEntry: SymTabEntry
+		GlobalEntr(string,line#,col#,filename)
+
+		const vector<RuleNode*> rules()
+		vector<RuleNode*> rules()
+		const RuleNode* rule(int)
+		RuleNode* rule(int)
+		void addRule(RuleNode*)
+
+	class BlockEntry: SymTabEntry
+		BlockEntry(string,line#,col#,filename)
+
+	class RuleBlockEntry: BlockEntry
+		RuleBlockEntry(line#,col#,filename)
+
+	class VariableEntry: SymTabEntry
+		VarKind {GLOBAL_VAR,LOCAL_VAR,PARAM_VAR,UNDEFINED}
+
+		VariableEntry(string,VarKind,Type*,ExprNode* init,line#,col#,filename)
+
+		VarKind varKind()
+		void varKind(VarKind v)
+
+		int offSet()
+		void offSet(int o)
+
+		const ExprNode* initVal()
+		ExprNode* initVal()
+		void initVal(ExprNode*)
+
+	class ClassEntry: SymTabEntry
+		ClassEntry(string,line#,col#,filename)
+
+	class FunctionEntry: SymTabEntry
+		FunctionEntry(name,Type*,line#,col#,filename)
+
+		const CompoundStmtNode* body()
+		CompoundStmtNode* body()
+		void body(CompoundStmtNode*)
+
+	class EventEntry: SymTabEntry
+		EventEntry(name,line#,col#,filename)
+
+SymTab.h
+	ErrorST {OK,DUPLICATE_SYM,INVALID_SCOPE,SYM_NOT_PRESENT}
+	class SymTab
+		SymTab(int initSize=4)
+		int size()
+
+		const SymTabEntry* lookUp(string)
+		SymTabEntr* lookUp(string)
+
+		ErrorST insert(SymTabEntry*)
+
+		const_iterator begin()
+		iterator begin()
+		const_iterator end()
+		iterator end()
+
+SymTabEntry.h
+	class SymTabEntry: ProgramElem
+		Kind {UNKNOWN_KIND,GLOBAL_KIND,CLASS_KIND,FUNCTION_KIND,VARIABLE_KIND,EVENT_KIND,RULE_KIND,BLOCK_KIND,RULE_BLOCK_KIND,EVENT_BLOCK_KIND,ERROR_KIND}
+
+		static string kindTag(Kind)
+
+		SymTabEntry(string,Kind,line#,col#,filename,Type*)
+
+		string name()
+		void name(string)
+
+		Kind kind()
+		void kind(Kind)
+
+		const SymTab* symTab()
+
+		const SymTabEntry* prev()
+		const SymTabEntry* next()
+
+		void prev(SymTabEntry*)
+		void next(SymTabEntry*)
+
+		SymTab* symTab()
+		SymTabEntry* prev()
+		SymTabEntry* next()
+
+		ErrorST insert(SymTabEntry*)
+
+SymTabMgr.h
+	class SymTabMgr
+		SymTabMgr()
+
+		const SymTabEntry* lookUp(string)
+		const SymTabEntry* lookUpInScope(name,Kind)
+		const SymTabEntry* currentScope()
+		const SymTabEntry* currentScope(Kind)
+
+		SymTabEntry* lookUp(string)
+		SymTabEntry* lookUpInScope(name,Kind)
+		SymTabEntry* currentScope()
+		SymTabEntry* currentScope(Kind)
+
+		ErrorST enterScope(SymTabEntry*)
+		ErrorST leaveScope()
+		ErrorST leaveScope(Kind)
+		ErrorST leaveToScope(Kind)
+		ErrorST insert(SymTabEntry*)
+
+Type.h
+	class Type
+		TypeTag {ERROR,UNKNOW,VOID,BOOL,STRING,BOOL,STRING,BYTE,UINT,INT,DOUBLE,CLASS,EVENT,FUNCTION,NUMERIC,INTEGRAL,SIGNED,UNSIGNED,SCALAR,PRIMITIVE,NATIVE,DATA,ANY}
+
+Value.h
+	class Value
+		Value()
+		Value(const char*)
+		Value(string)
+		Value(bool)
+		Value(int,Type::TypeTag)
+		Value(unsigned int,Type::TypeTag)
+		Value(double)
+		Value(Type::TypeTag)
+
+		const Type* type()
+
+		string sval()
+		bool bval()
+		int ival()
+		double dval()
+
+		void sval(string)
+		void bval(bool)
+		void ival(int)
+		void dval(double)
+

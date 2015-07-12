@@ -1,0 +1,27 @@
+int x = 20+10;
+int y = -x + -x;
+int z = -x + 1;
+
+bool c = false;
+
+bool cond = (c && true) && false;
+
+event a(int w);
+
+a(n) -> {
+	if(n > x){
+		x = x + n;
+	} else {
+		x = x - n;
+	}
+
+	x = x + 1;
+
+	while(y < z){
+		y = y + 1;
+	}
+
+	x = 20 + 10;
+	y = -x + -x;
+	z = -x + 1;
+}

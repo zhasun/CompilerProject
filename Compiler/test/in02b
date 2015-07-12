@@ -1,0 +1,55 @@
+/* 
+ * One interface, one module
+ * Tests: 
+ *        class declaration
+ *        function decl with body 
+ */
+    
+    int w = 37372,x = w + 12222,y = x;
+    double z = w + x - 2.753;
+
+    double aaa = 2.45 + (~(x^y) & ~(w|x));
+
+    bool cond = !(true && true) || true;
+
+    event a (int j);
+    int logMessage(string x) ;
+
+    /*int fib(int x) {
+        int s = x + x, t = x + x;
+
+        while(false){
+            while(true){
+                while(true){
+                    if(false){
+                        x = 4;
+                        break 1;
+                        break 2;
+                        break 3;
+                    }
+                }
+            }
+        }
+        
+        if(x <= 1){
+            return 1;
+        } else {
+            s = fib(x-1);
+            t = fib(x-2);
+            return s+t;
+        }
+   };*/
+
+    int max(int a,int b){
+        if(a > b){
+            return a;
+        } else {
+            return b;
+        }
+        return b;
+    };
+
+    a(num) -> {
+        x = 3 + max(num,x) + 10;
+    };
+
